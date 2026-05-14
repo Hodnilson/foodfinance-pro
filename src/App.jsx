@@ -1,4 +1,6 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
+import { collection, addDoc, deleteDoc, doc, onSnapshot, query, orderBy } from 'firebase/firestore';
+import { db } from './firebaseConfig';
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
 import TransactionForm from './components/TransactionForm';
@@ -121,7 +123,7 @@ const SAMPLE_TRANSACTIONS = [
 
 export default function App() {
   const [activePage, setActivePage] = useState('dashboard');
-  const [transactions, setTransactions] = useState(SAMPLE_TRANSACTIONS);
+  const [transactions, setTransactions] = useState([]);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [toasts, setToasts] = useState([]);
   const [sidebarOpen, setSidebarOpen] = useState(window.innerWidth > 768);
@@ -139,23 +141,45 @@ export default function App() {
     setToasts(prev => prev.filter(t => t.id !== id));
   }, []);
 
-  // ── CRUD Operations ──
-  // TODO: Replace with Firebase operations
-  // import { collection, addDoc, deleteDoc, doc, onSnapshot } from 'firebase/firestore';
-  // import { db } from './firebaseConfig';
+  // ── CRUD Operations (Firebase) ──
+  useEffect(() => {
+    const q = query(collection(db, 'transactions'), orderBy('createdAt', 'desc'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setTransactions(data);
+    }, (error) => {
+      console.error("Erro ao buscar transações:", error);
+    });
+    return () => unsubscribe();
+  }, []);
 
-  const handleSaveTransaction = useCallback((transaction) => {
-    setTransactions(prev => [transaction, ...prev]);
-    addToast(
-      transaction.type === 'entrada'
-        ? `✅ Entrada de ${new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(transaction.amount)} registrada!`
-        : `📦 Saída de ${new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(transaction.amount)} registrada!`
-    );
+  const handleSaveTransaction = useCallback(async (transaction) => {
+    try {
+      const { id, ...dataToSave } = transaction;
+      await addDoc(collection(db, 'transactions'), dataToSave);
+      
+      addToast(
+        transaction.type === 'entrada'
+          ? `✅ Entrada de ${new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(transaction.amount)} registrada!`
+          : `📦 Saída de ${new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(transaction.amount)} registrada!`
+      );
+    } catch (error) {
+      console.error("Error adding transaction: ", error);
+      addToast('Erro ao salvar no banco', 'error');
+    }
   }, [addToast]);
 
-  const handleDeleteTransaction = useCallback((id) => {
-    setTransactions(prev => prev.filter(t => t.id !== id));
-    addToast('🗑️ Transação removida', 'error');
+  const handleDeleteTransaction = useCallback(async (id) => {
+    try {
+      await deleteDoc(doc(db, 'transactions', id));
+      addToast('🗑️ Transação removida', 'success');
+    } catch (error) {
+      console.error("Error removing transaction: ", error);
+      addToast('Erro ao remover do banco', 'error');
+    }
   }, [addToast]);
 
   return (
